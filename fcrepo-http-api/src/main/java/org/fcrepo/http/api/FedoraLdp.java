@@ -172,6 +172,7 @@ public class FedoraLdp extends ContentExposingResource {
      */
     @PostConstruct
     public void postConstruct() {
+        uriInfo = new FedoraUrlInfoWrapper(uriInfo, headers);
         setUpJMSInfo(uriInfo, headers);
     }
 
