@@ -2,7 +2,9 @@ package org.fcrepo.http.api;
 
 import java.net.URI;
 import java.net.URISyntaxException;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 import javax.ws.rs.core.HttpHeaders;
 import javax.ws.rs.core.MultivaluedMap;
@@ -14,38 +16,87 @@ public class FedoraUrlInfoWrapper implements UriInfo {
     
     private UriInfo uriInfo;
     private HttpHeaders headers;
-    private static String ORIGIN = "origin";
+//    private static String ORIGIN = "origin";
+    private static String X_FORWARD_PROTO = "x-forwarded-proto";
+    private static String X_FORWARD_HOST = "x-forwarded-host";
+    private static String FORWARDED = "forwarded";
+    private static String FORWARDED_HOST_PARAM = "host";
+    private static String FORWARDED_PROTOCOL_PARAM = "proto";
+    
+    private String protocol = null;
+    private String host = null;
+    private int port = -2;
     
     FedoraUrlInfoWrapper(UriInfo uriInfo, HttpHeaders headers) {
         this.uriInfo = uriInfo;
         this.headers = headers;
+        
+        String xForwardProto = getHeader(X_FORWARD_PROTO);
+        if( xForwardProto != null ) protocol = xForwardProto;
+        
+        String xForwardHost = getHeader(X_FORWARD_HOST);
+        if( xForwardHost != null ) setHost(xForwardHost);
+        
+        String forwarded = getHeader(FORWARDED);
+        if( forwarded != null ) {
+            Map<String, String> values = parseForwardedHeader(forwarded);
+            if( values.containsKey(FORWARDED_HOST_PARAM) ) setHost(values.get(FORWARDED_HOST_PARAM));
+            if( values.containsKey(FORWARDED_PROTOCOL_PARAM) ) protocol = values.get(FORWARDED_PROTOCOL_PARAM);
+        }
     }
     
-    private String getOriginHeader() {
-        List<String> origins = headers.getRequestHeader(ORIGIN);
-        if( origins == null ) return null;
-        if( origins.size() == 0 ) return null;
-        return origins.get(0);
+    private String getHeader(String name) {
+        List<String> values = headers.getRequestHeader(name);
+        if( values == null ) return null;
+        if( values.size() == 0 ) return null;
+        return values.get(0);
     }
     
-    private URI getOriginUri() {
-        String origin = getOriginHeader();
-        if( origin == null ) return null;
+    private Map<String, String> parseForwardedHeader(String forwarded) {
+        Map<String, String> valueMap = new HashMap<String, String>();
+        
+        String[] parts = forwarded.split(";");
+        for( String part : parts ) {
+            String[] keyValue = part.split("=");
+            if( keyValue.length < 2 ) continue;
+            valueMap.put(keyValue[0].trim().toLowerCase(), keyValue[1].trim());
+        }
+        
+        return valueMap;
+    }
+    
+    private String getRelativeHost(String host) {
+        if( this.host != null ) return this.host;
+        return host;
+    }
+    
+    private String getRelativeProtocol(String protocol) {
+        if( this.protocol != null ) return this.protocol;
+        return protocol;
+    }
+    
+    private int getRelativePort(int port) {
+        if( this.port != -2 ) return this.port;
+        return port;
+    }
+    
+    private void setHost(String host) {
         try {
-            return new URI(origin);
+            // just want to split out port and host
+            URI uri = new URI("http://"+host);
+            this.host = uri.getHost();
+            this.port = uri.getPort();
         } catch (URISyntaxException e) {
-            return null;
-        }    
+            e.printStackTrace();
+        }
     }
+    
     
     private URI wrapUri(URI uri) {
-        if( uri == null ) return uri;
-        URI originUri = getOriginUri();
-        if( originUri == null ) return uri;
-        
         try {
-            return new URI(originUri.getScheme(), uri.getUserInfo(), originUri.getHost(),
-                    originUri.getPort(), uri.getPath(), uri.getQuery(), uri.getFragment());
+            return new URI(
+                    getRelativeProtocol(uri.getScheme()), uri.getUserInfo(), getRelativeHost(uri.getHost()),
+                    getRelativePort(uri.getPort()), uri.getPath(), uri.getQuery(), uri.getFragment());
         } catch (URISyntaxException e) {
             e.printStackTrace();
             return uri;
@@ -53,11 +104,11 @@ public class FedoraUrlInfoWrapper implements UriInfo {
     }
     
     private UriBuilder wrapUriBuilder(UriBuilder builder) {
-        if( builder == null ) return builder;
-        URI originUri = getOriginUri();
-        if( originUri == null ) return builder;
-        
-        return builder.scheme(originUri.getScheme()).host(originUri.getHost()).port(originUri.getPort());
+        URI uri = builder.build();
+        return builder
+            .scheme(getRelativeProtocol(uri.getScheme()))
+            .host(getRelativeHost(uri.getHost()))
+            .port(getRelativePort(uri.getPort()));
     }
 
     @Override
